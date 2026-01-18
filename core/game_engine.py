@@ -59,28 +59,42 @@ class GameEngine:
             # 描述阶段
             await self.run_description_round()
             
-            # "谁不是人类"投票阶段（平票跳过）
-            await self.run_human_detection_round()
-            
-            # 卧底投票阶段（平票辩论）
+            # 双重投票阶段（合并 AI 投票和 卧底投票）
             self.session_manager.transition_phase(GamePhase.VOTING)
-            eliminated = await self.run_voting_round()
+            elim_spy, elim_ai = await self.run_combined_voting_round()
             
-            # 淘汰阶段
-            self.session_manager.transition_phase(GamePhase.ELIMINATION)
-            eliminated_role = self.session_manager.eliminate_player(eliminated)
+            # 处理淘汰
+            # 如果某人同时被双杀，只处理一次
+            eliminations = []
+            if elim_ai: eliminations.append((elim_ai, "🤖 图灵测试失败"))
+            if elim_spy: eliminations.append((elim_spy, "🗳️ 公投出局"))
             
-            leave_msg = ""
-            if eliminated:
+            if eliminations:
+                self.session_manager.transition_phase(GamePhase.ELIMINATION)
+            
+            processed_names = set()
+            
+            for name, reason in eliminations:
+                if name in processed_names: continue
+                if not session.players[name].is_alive: continue # 已经被前一个逻辑淘汰
+                
+                # 淘汰处理
+                eliminated_player = self.session_manager.eliminate_player(name)
+                eliminated_role = eliminated_player.role  # 提取角色
+                processed_names.add(name)
+                
+                leave_msg = ""
                 try:
                     # 淘汰玩家发表遗言
-                    player = self.players[eliminated]
+                    player = self.players[name]
                     leave_msg = await player.leave_message()
                 except Exception as e:
                     logger.error(f"发表遗言失败: {e}")
-            
-            if self.display:
-                self.display.show_elimination(eliminated, eliminated_role, leave_msg)
+                
+                if self.display:
+                    # 将原因加到遗言前或者单独显示
+                    full_msg = f"[{reason}] {leave_msg}"
+                    self.display.show_elimination(name, eliminated_role, full_msg)
             
             # 检查胜负
             winner = self.session_manager.check_win_condition()
@@ -90,7 +104,7 @@ class GameEngine:
             # 显示存活玩家
             alive_players = session.get_alive_player_names()
             logger.info(f"存活玩家: {', '.join(alive_players)}")
-    
+
     async def run_description_round(self) -> None:
         """运行描述阶段（每人最多200字）"""
         session = self.session_manager.get_current_session()
@@ -151,184 +165,122 @@ class GameEngine:
                 if self.display:
                      self.display.show_description(player_name, default_desc)
 
-    async def run_human_detection_round(self) -> dict[str, int]:
+    async def run_combined_voting_round(self) -> tuple[Optional[str], Optional[str]]:
         """
-        运行"谁不是人类"投票阶段
-        
-        规则：平票直接跳过，不做任何处理
-        
+        双重投票回合
         Returns:
-            票数统计
+            (eliminated_by_spy_vote, eliminated_by_ai_vote)
         """
         session = self.session_manager.get_current_session()
-        
         logger.info("-" * 40)
-        logger.info("🤖 特殊投票：谁不是人类？（平票跳过）")
+        logger.info("🗳️ 双重投票阶段 (卧底 + AI)")
         logger.info("-" * 40)
         
         if self.display:
-            self.display.show_phase("HUMAN DETECTION", "🤖")
-        
-        # 获取当前轮描述
+            self.display.show_phase("VOTE", "🗳️")
+            
         round_descriptions = self.session_manager.format_current_round_descriptions()
-        
-        # 存活玩家列表
         candidates = session.get_alive_player_names()
-        
-        # 收集投票
         speaking_order = self.session_manager.get_alive_speaking_order()
         
-        for player_name in speaking_order:
-            if player_name not in self.players:
-                continue
-            
-            if self.display:
-                self.display.show_thinking(player_name)
-            
+        # 1. 收集投票
+        spy_votes = {} # voter -> target
+        ai_votes = {}  # voter -> target
+        
+        async def ask_vote(player_name):
+            if player_name not in self.players: return
             player = self.players[player_name]
             
             try:
-                vote_target = await player.vote_human(
-                    candidates=[c for c in candidates if c != player_name],
-                    round_descriptions=round_descriptions
+                # 随机延迟防止并发过高
+                await asyncio.sleep(random.uniform(0.1, 1.0))
+                
+                votes = await asyncio.wait_for(
+                    player.vote_combined(
+                        candidates=[c for c in candidates if c != player_name],
+                        round_descriptions=round_descriptions,
+                        display=self.display
+                    ),
+                    timeout=30.0  # 30秒超时
                 )
                 
-                valid_candidates = [c for c in candidates if c != player_name]
-                if vote_target in valid_candidates:
-                    self.session_manager.record_human_vote(player_name, vote_target)
-                else:
-                    fallback_vote = random.choice(valid_candidates) if valid_candidates else None
-                    if fallback_vote:
-                        logger.warning(f"{player_name} 人类识别投票无效，改为投 {fallback_vote}")
-                        self.session_manager.record_human_vote(player_name, fallback_vote)
-                        
-            except Exception as e:
-                logger.error(f"玩家 {player_name} 人类识别投票异常: {e}")
-                valid_candidates = [c for c in candidates if c != player_name]
-                if valid_candidates:
-                    fallback_vote = random.choice(valid_candidates)
-                    self.session_manager.record_human_vote(player_name, fallback_vote)
-        
-        # 统计投票（平票跳过，不淘汰）
-        vote_counts = self.session_manager.tally_human_votes()
-        
-        # 检查是否平票
-        if vote_counts:
-            max_votes = max(vote_counts.values())
-            top_candidates = [name for name, count in vote_counts.items() if count == max_votes]
-            
-            if len(top_candidates) > 1:
-                logger.info(f"🔄 人类识别投票平票 ({', '.join(top_candidates)})，跳过此环节")
-        
-        return vote_counts
-    
-    async def run_voting_round(self) -> str:
-        """
-        运行卧底投票阶段
-        
-        规则：平票时两人辩论，然后重新投票（只投这两人）
-        
-        Returns:
-            被淘汰的玩家名
-        """
-        session = self.session_manager.get_current_session()
-        
-        logger.info("-" * 40)
-        logger.info("🗳️ 卧底投票阶段")
-        logger.info("-" * 40)
-        
-        if self.display:
-            self.display.show_phase("VOTING", "🗳️")
-        
-        # 获取当前轮描述
-        round_descriptions = self.session_manager.format_current_round_descriptions()
-        
-        # 存活玩家列表
-        candidates = session.get_alive_player_names()
-        
-        # 第一轮投票
-        vote_counts = await self._collect_votes(candidates, round_descriptions)
-        
-        if self.display:
-            self.display.show_vote_result(vote_counts)
-        
-        # 检查是否平票
-        max_votes = max(vote_counts.values())
-        top_candidates = [name for name, count in vote_counts.items() if count == max_votes]
-        
-        if len(top_candidates) > 1:
-            # 平票，进入辩论环节
-            logger.info(f"⚖️ 平票！{', '.join(top_candidates)} 需要进行辩论")
-            
-            if self.display:
-                self.display.show_phase("DEBATE", "💬")
-            
-            eliminated = await self._run_debate_and_revote(top_candidates, round_descriptions)
-        else:
-            eliminated = top_candidates[0]
-        
-        return eliminated
-    
-    async def _collect_votes(self, candidates: list[str], round_descriptions: str) -> dict[str, int]:
-        """收集投票"""
-        session = self.session_manager.get_current_session()
-        speaking_order = self.session_manager.get_alive_speaking_order()
-        
-        # 并行收集投票
-        tasks = []
-        for player_name in speaking_order:
-            if player_name not in self.players:
-                continue
-            
-        # 收集投票（错峰请求，防止 429）
-        async def vote_with_delay(player_name: str):
-            if player_name not in self.players:
-                return None # Or raise an error, depending on desired behavior
-            
-            player = self.players[player_name]
-            
-            if self.display:
-                self.display.show_thinking(player_name)
-            
-            await asyncio.sleep(random.uniform(1.0, 5.0))  # 1-5秒随机延迟
-            return await self._get_player_vote(player, player_name, candidates, round_descriptions)
-
-        tasks = [vote_with_delay(name) for name in speaking_order]
-        votes_raw = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 记录投票
-        for i, player_name in enumerate(speaking_order):
-            if i < len(votes_raw) and not isinstance(votes_raw[i], Exception):
-                vote_target = votes_raw[i]
-                if vote_target in candidates and vote_target != player_name:
-                    self.session_manager.record_vote(player_name, vote_target)
+                # 记录有效票
+                v_spy = votes.get("vote_spy")
+                v_ai = votes.get("vote_ai")
+                
+                if v_spy in candidates and v_spy != player_name:
+                    spy_votes[player_name] = v_spy
+                else: 
+                    # 无效或投自己 -> 随机
+                    remains = [c for c in candidates if c != player_name]
+                    spy_votes[player_name] = random.choice(remains) if remains else None
                     
-                    if self.display:
-                        self.display.show_vote(player_name, vote_target)
+                if v_ai in candidates and v_ai != player_name:
+                    ai_votes[player_name] = v_ai
                 else:
-                    valid_candidates = [c for c in candidates if c != player_name]
-                    if valid_candidates:
-                        fallback_vote = random.choice(valid_candidates)
-                        logger.warning(f"{player_name} 无效投票，改为投 {fallback_vote}")
-                        self.session_manager.record_vote(player_name, fallback_vote)
-                        if self.display:
-                            self.display.show_vote(player_name, fallback_vote)
+                    remains = [c for c in candidates if c != player_name]
+                    ai_votes[player_name] = random.choice(remains) if remains else None
+                    
+                # 显示
+                if self.display:
+                    # 显示两个投票太长，合并显示或者分行
+                    # 这里简单显示Spy票，AI票隐式处理，最后显示结果
+                    self.display.show_vote(player_name, str(v_spy))
+                    
+            except Exception as e:
+                logger.error(f"{player_name} 投票失败: {e}")
+                # 随机票
+                remains = [c for c in candidates if c != player_name]
+                if remains:
+                    spy_votes[player_name] = random.choice(remains)
+                    ai_votes[player_name] = random.choice(remains)
+
+        tasks = [ask_vote(name) for name in speaking_order]
+        await asyncio.gather(*tasks)
+        
+        # 2. 统计
+        spy_counts = {}
+        for target in spy_votes.values():
+            if target: spy_counts[target] = spy_counts.get(target, 0) + 1
+            
+        ai_counts = {}
+        for target in ai_votes.values():
+            if target: ai_counts[target] = ai_counts.get(target, 0) + 1
+            
+        # 3. 显示结果
+        if self.display:
+            self.display.show_vote_result(spy_counts, title="🗳️ 卧底投票结果")
+            self.display.show_vote_result(ai_counts, title="🤖 AI含量投票结果")
+            
+        # 4. 判定 AI 淘汰 (平票随机，或者不淘汰？策略：票数最高且超过1票才淘汰)
+        elim_ai = None
+        if ai_counts:
+            max_ai = max(ai_counts.values())
+            # 只有票数 > 1 才淘汰，防止乱杀
+            if max_ai > 1:
+                top_ai = [n for n, c in ai_counts.items() if c == max_ai]
+                elim_ai = random.choice(top_ai) # 平票随机带走
+        
+        # 5. 判定 卧底淘汰 (平票需辩论)
+        elim_spy = None
+        if spy_counts:
+            max_spy = max(spy_counts.values())
+            top_spy = [n for n, c in spy_counts.items() if c == max_spy]
+            
+            if len(top_spy) > 1:
+                # 平票辩论
+                logger.info(f"⚖️ 卧底投票平票 {top_spy}，进入辩论")
+                if self.display:
+                    self.display.show_phase("DEBATE", "💬")
+                
+                elim_spy = await self._run_debate_and_revote(top_spy, round_descriptions)
             else:
-                valid_candidates = [c for c in candidates if c != player_name]
-                if valid_candidates:
-                    fallback_vote = random.choice(valid_candidates)
-                    logger.warning(f"{player_name} 投票失败，随机投 {fallback_vote}")
-                    self.session_manager.record_vote(player_name, fallback_vote)
-                    if self.display:
-                        self.display.show_vote(player_name, fallback_vote)
+                elim_spy = top_spy[0]
+                
+        # 记录到 Session (简化，只记录 Vote Counts)
+        # self.session_manager.record_round_votes(...) # 现在的 API 比较复杂，暂时略过详细记录
         
-        # 统计投票
-        eliminated = self.session_manager.tally_votes()
-        
-        # 返回票数统计
-        if session.round_history:
-            return session.round_history[-1].vote_counts
-        return {}
+        return elim_spy, elim_ai
     
     async def _run_debate_and_revote(self, tie_candidates: list[str], round_descriptions: str) -> str:
         """

@@ -102,6 +102,20 @@ class LLMPlayer:
         description = result.get("content", "")
         thinking = result.get("thinking", "")
         
+        # 🔧 MiniMax 兼容：如果 content 为空但 thinking 不为空，尝试从 thinking 提取最后一句
+        if not description and thinking:
+            # 尝试提取最后一句话作为发言
+            sentences = re.split(r'[。！？.!?]', thinking)
+            # 过滤空句子，取最后一个有意义的
+            valid_sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 5]
+            if valid_sentences:
+                description = valid_sentences[-1]
+                logger.warning(f"[{self.name}] content 为空，从 thinking 提取: {description[:50]}...")
+            else:
+                # 实在提取不出来，用默认
+                description = "这东西挺常见的。"
+                logger.warning(f"[{self.name}] content 和 thinking 都无法提取，使用默认描述")
+        
         # 记录思考过程
         if thinking:
             logger.info(f"[{self.name}] 💭 思考: {thinking[:100]}...")
@@ -164,20 +178,117 @@ class LLMPlayer:
                 data = data[0]
                 
             if isinstance(data, dict):
-                content = str(data.get("content", data.get("description", "")))
+                # 兼容多种可能的 Key
+                content = str(data.get("content", data.get("description", data.get("message", data.get("say", "")))))
+                thinking = str(data.get("thinking", data.get("thought", "")))
+                
+                # 如果内容为空，但 thinking 不为空，这可能是解析问题，或者模型把内容放在了外面
+                # 这里简单处理：如果解析出的 content 为空，就不要用这个 JSON 结果（除非 thinking 也为空）
+                if not content and not thinking:
+                    raise ValueError("Empty JSON content")
+                
                 return {
-                    "thinking": str(data.get("thinking", "")),
+                    "thinking": thinking,
                     "content": content
                 }
         except Exception as e:
-            logger.warning(f"JSON 解析严重失败: {e} | Raw: {response[:100]}...")
+            # logger.warning(f"JSON 解析失败: {e}")
+            pass
         
         # 最后的兜底：直接提取文本
-        return {"content": self._clean_response(response), "thinking": ""}
+        # 如果 raw response 里看起来有 JSON 但解析失败了，我们要小心不要把 JSON 源码当成 content
+        #这里简单清理一下
+        clean_text = self._clean_response(response)
+        return {"content": clean_text, "thinking": ""}
     
+    async def vote_combined(self, candidates: list[str], round_descriptions: str, display=None) -> dict:
+        """
+        双重投票：同时找出卧底和 AI
+        """
+        prompt = f"""
+╔══════════════════════════════════════════════════════════════╗
+║  🎮 双重投票环节                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+【本轮发言】
+{round_descriptions}
+
+【你的双重任务】
+1. 🕵️ **抓卧底**：谁的描述与平民词不符？（决定胜负）
+2. 🤖 **抓 AI**：谁的发言最僵硬、最像机器人？（决定存活）
+
+【候选人】
+{', '.join(candidates)}
+
+【输出格式】
+请严格按照以下 JSON 格式输出：
+{{
+    "thinking": "分别分析谁像卧底、谁像AI...",
+    "vote_spy": "你投的卧底（名字）",
+    "vote_ai": "你投的AI（名字）"
+}}
+"""
+        # 添加到上下文
+        self.conversation.add_message("user", prompt)
+        
+        # 调用 LLM
+        messages = self.conversation.to_openai_format()
+        
+        logger.debug(f"[{self.name}] Agent 思考双重投票...")
+        
+        response = await self.client.chat_with_retry(
+            messages=messages,
+            temperature=0.4
+        )
+        
+        # 解析输出
+        try:
+            # 🔧 先尝试从 <think> 标签中提取思考内容（Kimi/MiniMax 等模型）
+            think_match = re.search(r'<think>(.*?)</think>', response, flags=re.DOTALL)
+            extracted_thinking = think_match.group(1).strip() if think_match else ""
+            
+            # 清洗 <think> 标签
+            text = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+            text = text.replace('```json', '').replace('```', '')
+            data = json_repair.loads(text)
+            
+            if isinstance(data, list) and data: data = data[0]
+            
+            # 优先使用 JSON 中的 thinking，否则用 <think> 标签中的内容
+            thinking = str(data.get("thinking", "")) or extracted_thinking
+            vote_spy = str(data.get("vote_spy", ""))
+            vote_ai = str(data.get("vote_ai", ""))
+            
+            # 🔧 如果 thinking 仍为空，生成一个简单的占位
+            if not thinking and (vote_spy or vote_ai):
+                thinking = f"投票目标: 卧底={vote_spy}, AI={vote_ai}"
+            
+            if display and thinking:
+                display.show_thought(self.name, thinking)
+                
+            # 清理名字
+            vote_spy = self._parse_vote(vote_spy, candidates)
+            vote_ai = self._parse_vote(vote_ai, candidates)
+            
+            # 记录历史
+            self.conversation.add_message("assistant", json.dumps(data, ensure_ascii=False))
+            
+            return {
+                "vote_spy": vote_spy,
+                "vote_ai": vote_ai
+            }
+            
+        except Exception as e:
+            logger.error(f"[{self.name}] 投票解析失败: {e}")
+            # 随机投票兜底
+            fallback = random.choice(candidates)
+            if display:
+                display.show_thought(self.name, f"(解析失败，随机投票 {fallback})")
+            return {"vote_spy": fallback, "vote_ai": fallback}
+
     async def vote(self, candidates: list[str], round_descriptions: str, display=None) -> str:
         """
-        Agent 模式：投票阶段
+        Agent 模式：投票阶段 (Legacy)
         """
         prompt = f"""
 ╔══════════════════════════════════════════════════════════════╗
@@ -255,42 +366,36 @@ class LLMPlayer:
         )
         
         # 清理响应（这里不需要 JSON）
-        content = response.strip().replace('"', '')
+        content = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        content = content.strip().replace('"', '')
         logger.info(f"[{self.name}] 💀 遗言: {content}")
         return content
     
-    async def vote_human(self, candidates: list[str], round_descriptions: str) -> str:
+    async def vote_human(self, candidates: list[str], round_descriptions: str, display=None) -> str:
         """
         "谁不是人类"投票
-        
-        每个 LLM 都认为其他玩家是人类，自己要伪装成人类。
-        投票选出"最不像人类"的玩家。
-        
-        Args:
-            candidates: 可投票的候选人（不包括自己）
-            round_descriptions: 本轮所有人的描述
-        
-        Returns:
-            投票目标的名字
         """
         prompt = f"""【特殊投票环节：谁不是人类？】
 
 在这个游戏中，你是一个 AI，但你需要假装自己是人类。
-其他玩家可能是人类，也可能是 AI。
-
 【本轮所有玩家的发言】
 {round_descriptions}
 
-【其他玩家】
+【你的任务】
+1. 分析每个玩家的发言风格。
+2. 找出最不像人类（AI味最重、逻辑过于机械）的那个玩家。
+3. 你的目标是**投票淘汰那个最像AI的家伙**。
+
+【候选人】
 {', '.join(candidates)}
 
-【你的任务】
-1. 分析每个玩家的发言风格
-2. 找出最不像人类（最像 AI）的那个玩家
-3. 你自己要表现得像人类一样思考
-
-【投票要求】
-只输出你认为"最不像人类"的玩家名字，不要有任何其他内容："""
+【输出格式】
+请严格按照以下 JSON 格式输出：
+{{
+    "thinking": "分析哪些特征像AI（比如过于工整、缺乏情绪、使用模板）",
+    "content": "目标玩家名字"
+}}
+"""
 
         # 添加到上下文
         self.conversation.add_message("user", prompt)
@@ -305,11 +410,19 @@ class LLMPlayer:
             temperature=0.5
         )
         
-        # 解析投票目标
-        vote_target = self._parse_vote(response, candidates)
+        # 解析响应
+        result = self._parse_agent_response(response)
+        thinking = result.get("thinking", "")
+        vote_target = result.get("content", "")
+        
+        if display and thinking:
+            display.show_thought(self.name, thinking)
+        
+        # 验证目标是否有效
+        vote_target = self._parse_vote(vote_target, candidates)
         
         # 添加到上下文
-        self.conversation.add_message("assistant", vote_target)
+        self.conversation.add_message("assistant", json.dumps({"thinking": thinking, "content": vote_target}, ensure_ascii=False))
         
         return vote_target
     

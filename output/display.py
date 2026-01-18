@@ -108,9 +108,79 @@ class GameDisplay:
             expand=False,
             padding=(0, 2)
         ))
+    
+    def show_vote(self, voter: str, target: str) -> None:
+        """显示投票"""
+        self.console.print(f"  🗳️ {voter} [dim]→[/dim] [bold]{target}[/bold]")
+    
+    def show_vote_result(self, vote_counts: dict[str, int], title: str = "📊 票数统计") -> None:
+        """显示投票结果"""
+        self.console.print()
+        
+        table = Table(title=title, box=box.SIMPLE)
+        table.add_column("玩家", style="bold")
+        table.add_column("票数", style="cyan")
+        
+        # 按票数排序
+        sorted_votes = sorted(vote_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        for name, count in sorted_votes:
+            bars = "█" * count
+            table.add_row(name, f"{count} {bars}")
+        
+        self.console.print(table)
+    
+    def show_elimination(self, player_name: str, role: Role, leave_message: str = "") -> None:
+        """显示淘汰结果"""
+        role_name = "卧底" if role == Role.SPY else "平民"
+        role_emoji = "🕵️" if role == Role.SPY else "👤"
+        
+        content = f"[bold]{player_name}[/bold] 被淘汰!\n身份: {role_emoji} [bold]{role_name}[/bold]"
+        if leave_message:
+            content += f"\n\n[italic]遗言: {leave_message}[/italic]"
+            
+        self.console.print()
+        
+        panel = Panel(
+            content,
+            title="🔴 淘汰",
+            border_style="red"
+        )
+        
+        self.console.print(panel)
+        self.console.print()
+        
+    def show_game_result(self, session: GameSession) -> None:
+        """显示游戏结果"""
+        self.console.print()
+        self.console.rule("[bold]游戏结束[/bold]", style="magenta")
+        self.console.print()
+        
+        if session.winner == Role.CIVILIAN:
+            winner_text = "[bold green]🎉 平民获胜! 🎉[/bold green]"
+            desc = "所有卧底已被成功识别并淘汰！"
+        else:
+            winner_text = "[bold red]🎉 卧底获胜! 🎉[/bold red]"
+            desc = "卧底成功隐藏身份存活到最后！"
+        
+        panel = Panel(
+            f"{winner_text}\n\n{desc}\n\n"
+            f"[dim]词对: {session.civilian_word} vs {session.spy_word}[/dim]\n"
+            f"[dim]总轮数: {session.current_round}[/dim]",
+            title="🏆 游戏结果",
+            border_style="magenta",
+            padding=(1, 2)
+        )
+        
+        self.console.print(panel)
+        self.console.print()
+        
+        # 显示最终玩家状态
+        self.show_players(session, reveal_roles=True)
         
     def show_thinking(self, player_name: str) -> None:
-        pass # 不再需要简单的 loading，因为有详细 thought
+        """显示正在思考的状态"""
+        self.console.print(f"  [dim]⏳ {player_name} 正在思考...[/dim]")
 
     def show_thought(self, player_name: str, content: str) -> None:
         """显示具体的思考内容"""
