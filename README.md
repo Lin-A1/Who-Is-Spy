@@ -77,7 +77,7 @@ cp .env.example .env
 ```
 
 ```env
-# 通义千问 (必须)
+# 通义千问
 QWEN_API_KEY=your_key_here
 QWEN_MODEL=qwen3-max
 
