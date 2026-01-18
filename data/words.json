@@ -1,0 +1,204 @@
+{
+    "word_pairs": [
+        {
+            "civilian": "苹果",
+            "spy": "梨"
+        },
+        {
+            "civilian": "眼镜",
+            "spy": "墨镜"
+        },
+        {
+            "civilian": "手机",
+            "spy": "平板"
+        },
+        {
+            "civilian": "咖啡",
+            "spy": "奶茶"
+        },
+        {
+            "civilian": "老虎",
+            "spy": "狮子"
+        },
+        {
+            "civilian": "足球",
+            "spy": "篮球"
+        },
+        {
+            "civilian": "地铁",
+            "spy": "公交"
+        },
+        {
+            "civilian": "医生",
+            "spy": "护士"
+        },
+        {
+            "civilian": "月亮",
+            "spy": "太阳"
+        },
+        {
+            "civilian": "玫瑰",
+            "spy": "百合"
+        },
+        {
+            "civilian": "钢琴",
+            "spy": "吉他"
+        },
+        {
+            "civilian": "包子",
+            "spy": "饺子"
+        },
+        {
+            "civilian": "大学",
+            "spy": "高中"
+        },
+        {
+            "civilian": "微信",
+            "spy": "QQ"
+        },
+        {
+            "civilian": "牛仔裤",
+            "spy": "休闲裤"
+        },
+        {
+            "civilian": "电影院",
+            "spy": "剧院"
+        },
+        {
+            "civilian": "空调",
+            "spy": "风扇"
+        },
+        {
+            "civilian": "沙发",
+            "spy": "床"
+        },
+        {
+            "civilian": "筷子",
+            "spy": "叉子"
+        },
+        {
+            "civilian": "飞机",
+            "spy": "高铁"
+        },
+        {
+            "civilian": "北京",
+            "spy": "上海"
+        },
+        {
+            "civilian": "汉堡",
+            "spy": "三明治"
+        },
+        {
+            "civilian": "蝴蝶",
+            "spy": "蜜蜂"
+        },
+        {
+            "civilian": "樱桃",
+            "spy": "草莓"
+        },
+        {
+            "civilian": "雪人",
+            "spy": "圣诞树"
+        },
+        {
+            "civilian": "厨师",
+            "spy": "服务员"
+        },
+        {
+            "civilian": "教授",
+            "spy": "老师"
+        },
+        {
+            "civilian": "银行",
+            "spy": "邮局"
+        },
+        {
+            "civilian": "雨伞",
+            "spy": "雨衣"
+        },
+        {
+            "civilian": "自行车",
+            "spy": "电动车"
+        },
+        {
+            "civilian": "橙子",
+            "spy": "柠檬"
+        },
+        {
+            "civilian": "麻将",
+            "spy": "扑克"
+        },
+        {
+            "civilian": "口红",
+            "spy": "唇膏"
+        },
+        {
+            "civilian": "拖鞋",
+            "spy": "凉鞋"
+        },
+        {
+            "civilian": "小说",
+            "spy": "漫画"
+        },
+        {
+            "civilian": "熊猫",
+            "spy": "考拉"
+        },
+        {
+            "civilian": "蛋糕",
+            "spy": "面包"
+        },
+        {
+            "civilian": "WiFi",
+            "spy": "蓝牙"
+        },
+        {
+            "civilian": "枕头",
+            "spy": "靠垫"
+        },
+        {
+            "civilian": "冰箱",
+            "spy": "冰柜"
+        },
+        {
+            "civilian": "牙刷",
+            "spy": "牙膏"
+        },
+        {
+            "civilian": "耳机",
+            "spy": "音箱"
+        },
+        {
+            "civilian": "鞋带",
+            "spy": "拉链"
+        },
+        {
+            "civilian": "台灯",
+            "spy": "吊灯"
+        },
+        {
+            "civilian": "西瓜",
+            "spy": "哈密瓜"
+        },
+        {
+            "civilian": "酱油",
+            "spy": "醋"
+        },
+        {
+            "civilian": "毛巾",
+            "spy": "浴巾"
+        },
+        {
+            "civilian": "闹钟",
+            "spy": "手表"
+        },
+        {
+            "civilian": "日记",
+            "spy": "笔记"
+        },
+        {
+            "civilian": "消防员",
+            "spy": "警察"
+        }
+    ]
+}
