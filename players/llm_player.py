@@ -44,22 +44,23 @@ class LLMPlayer:
     def conversation(self) -> ConversationContext:
         return self.session.conversation
     
-    async def describe(self, round_number: int, history: str, max_length: int = 200, alive_players: list[str] = None) -> str:
+    async def describe(self, round_number: int, history: str, max_length: int = 200, alive_players: list[str] = None, display=None) -> str:
         """
         Agent 模式：描述阶段（含互动）
-        
-        Args:
-            round_number: 当前轮次
-            history: 历史发言记录
-            max_length: 最大字数限制
-            alive_players: 当前存活玩家列表
-        
-        Returns:
-            完整的发言内容（描述+评论+建议）
         """
         alive_info = f"当前存活玩家: {', '.join(alive_players)}" if alive_players else ""
         
-        # === 中文自然语言 Prompt ===
+        # 针对第一轮的特殊警告，防止秒送
+        round_warning = ""
+        if round_number == 1:
+            round_warning = """
+⚠️ **第一轮严重警告**：
+你是第一轮发言，或者游戏才刚开始。**绝对禁止**说出任何具体的地名、人名、在此类词汇中独有的地标！
+如果你的描述太明显（例如描述"北京"时说了"故宫"），卧底会立刻猜出并获胜，**你就是导致输掉游戏的罪人**。
+请务必使用抽象、侧面、模糊的描述！
+"""
+
+        # === JSON Prompt (更稳定) ===
         prompt = f"""
 【聊天记录】
 {history if history else "(暂无)"}
@@ -69,14 +70,19 @@ class LLMPlayer:
 {alive_info}
 你的词语：【{self.word}】（不能直接说出来！）
 
+{round_warning}
+
 【任务】
 轮到你发言了。
 1. 先在心里想想：有没有人可疑？我该怎么描述？
 2. 然后说一句自然的话给大家听。
 
 【输出格式】
-思考：(你的内心想法)
-发言：(你的公开发言)
+请严格按照以下 JSON 格式输出：
+{{
+    "thinking": "你的内心想法（分析局势）",
+    "content": "你的公开发言（口语化、自然）"
+}}
 """
         # 添加到上下文
         self.conversation.add_message("user", prompt)
@@ -91,19 +97,25 @@ class LLMPlayer:
             temperature=0.85 # 提高温度，增加随机性和自然度
         )
         
-        # 解析 Agent 输出 (自然语言格式)
-        result = self._parse_natural_response(response)
+        # 解析 Agent 输出 (JSON 格式)
+        result = self._parse_agent_response(response)
         description = result.get("content", "")
         thinking = result.get("thinking", "")
         
         # 记录思考过程
         if thinking:
             logger.info(f"[{self.name}] 💭 思考: {thinking[:100]}...")
+            # 推送思考过程给前端
+            if display:
+                display.show_thought(self.name, thinking)
         
         full_statement = description
         logger.info(f"[{self.name}] 📢 发言: {full_statement}")
         
         # 添加到上下文
+        # 注意：这里我们只把 content 存入历史，还是把整个 JSON 存入？
+        # 为了不混淆下轮 Context，最好只存 content 或者存 JSON string。
+        # 既然前面是 user prompt，assistant 回复应该是完整的 JSON string。
         self.conversation.add_message("assistant", response)
         
         return full_statement
@@ -138,19 +150,34 @@ class LLMPlayer:
         }
         
     def _parse_agent_response(self, response: str) -> dict:
-        # 由于我们切换到了 _parse_natural_response，这个旧方法留着备用或删除
-        return self._parse_natural_response(response)
+        """解析 Agent 的结构化输出（使用 json_repair 增强鲁棒性）"""
+        try:
+            # 1. 尝试清洗可能存在的 Markdown 标记
+            text = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+            text = text.replace('```json', '').replace('```', '')
+            
+            # 2. 使用 json_repair 自动修复并解析
+            data = json_repair.loads(text)
+            
+            # 3. 兼容列表返回的情况
+            if isinstance(data, list) and len(data) > 0:
+                data = data[0]
+                
+            if isinstance(data, dict):
+                content = str(data.get("content", data.get("description", "")))
+                return {
+                    "thinking": str(data.get("thinking", "")),
+                    "content": content
+                }
+        except Exception as e:
+            logger.warning(f"JSON 解析严重失败: {e} | Raw: {response[:100]}...")
+        
+        # 最后的兜底：直接提取文本
+        return {"content": self._clean_response(response), "thinking": ""}
     
-    async def vote(self, candidates: list[str], round_descriptions: str) -> str:
+    async def vote(self, candidates: list[str], round_descriptions: str, display=None) -> str:
         """
         Agent 模式：投票阶段
-        
-        Args:
-            candidates: 可投票的候选人（不包括自己）
-            round_descriptions: 本轮所有人的描述
-        
-        Returns:
-            投票目标的名字
         """
         prompt = f"""
 ╔══════════════════════════════════════════════════════════════╗
@@ -195,6 +222,8 @@ class LLMPlayer:
         
         if thinking:
             logger.info(f"[{self.name}] 🗳️ 投票分析: {thinking[:80]}...")
+            if display:
+                display.show_thought(self.name, thinking)
         
         # 解析投票目标
         vote_target = self._parse_vote(vote_target_raw, candidates)

@@ -277,14 +277,15 @@ async def main():
     # 记录游戏开始
     game_logger.log_game_start(session)
     
-    # 显示玩家列表（不显示角色）
-    display.show_players(session, reveal_roles=False)
+    # 显示玩家列表（显示角色，方便上帝视角观察）
+    display.show_players(session, reveal_roles=True)
     
     # 创建游戏引擎并运行游戏
     engine = GameEngine(
         session_manager=session_manager,
         players=llm_players,
-        max_description_length=max_description_length
+        max_description_length=max_description_length,
+        display=display
     )
     
     try:

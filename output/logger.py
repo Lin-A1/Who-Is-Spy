@@ -48,13 +48,13 @@ class GameLogger:
         # 移除默认处理器
         logger.remove()
         
-        # 控制台输出（彩色，简化格式）
-        logger.add(
-            sys.stdout,
-            format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
-            level="INFO",
-            colorize=True
-        )
+        # 控制台输出（已禁用，由 GameDisplay 接管）
+        # logger.add(
+        #     sys.stdout,
+        #     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+        #     level="INFO",
+        #     colorize=True
+        # )
         
         # 文件输出（详细格式，包含所有日志）
         logger.add(

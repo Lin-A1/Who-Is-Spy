@@ -23,7 +23,7 @@ class LLMProviderConfig:
 @dataclass
 class GameConfig:
     """游戏配置"""
-    spy_count: int = 1
+    spy_count: int = 2
     player_count: int = 7  # 玩家数量
     max_description_length: int = 200  # 每轮描述最大字数
     description_timeout: float = 60.0  # 描述超时（秒）
@@ -48,7 +48,7 @@ class Config:
     
     def __post_init__(self):
         # 从环境变量加载配置
-        self.game.spy_count = int(os.getenv("GAME_SPY_COUNT", "1"))
+        self.game.spy_count = int(os.getenv("GAME_SPY_COUNT", "2"))
         self.game.player_count = int(os.getenv("GAME_PLAYER_COUNT", "7"))
         self.game.max_description_length = int(os.getenv("GAME_MAX_DESCRIPTION_LENGTH", "200"))
         

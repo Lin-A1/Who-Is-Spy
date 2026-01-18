@@ -124,7 +124,8 @@ class GameEngine:
                     round_number=session.current_round,
                     history=history,
                     max_length=self.max_description_length,
-                    alive_players=speaking_order
+                    alive_players=speaking_order,
+                    display=self.display  # 传入 Display 以显示思考过程
                 )
                 
                 # 记录描述
@@ -457,7 +458,8 @@ class GameEngine:
         try:
             vote_target = await player.vote(
                 candidates=[c for c in candidates if c != player_name],
-                round_descriptions=round_descriptions
+                round_descriptions=round_descriptions,
+                display=self.display
             )
             return vote_target
         except Exception as e:
